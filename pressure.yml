@@ -1,0 +1,14 @@
+config:
+  target: 'ws://0.0.0.0:11800/ws'  # 被测试的WebSocket服务的URL
+  phases:                       
+    - duration: 60              # 此阶段的持续时间（秒）
+      arrivalRate: 233         # 每秒新建立的虚拟用户数量
+
+scenarios:
+  - engine: "ws"                # 使用WebSocket引擎
+    flow:                       # 此场景下虚拟用户的操作流程
+      - loop:                   # 使用循环来使每个用户每秒发送一条消息
+          - send: '{"message": "hello server"}'
+          - think: 1           # 暂停1秒
+        count: 60              # 循环60次，即60秒
+

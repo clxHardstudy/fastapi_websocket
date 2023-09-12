@@ -1,14 +1,23 @@
 import asyncio
 
 import uvicorn
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.models.database import Base, engine
 from app.routers.user import router_user
-from app import crud
 from app import logger
-from configs.setting import config
+from algorithm import deal_data
 import json
+from configs.setting import config
+from app import crud
+from utils import RedisServer
+
+# 定义状态常量
+WS_CONNECTED = 1
+WS_DISCONNECTED = 2
+
+HEARTBEAT_MESSAGE = "0"
+MAX_RETRIES = 3
 
 Base.metadata.create_all(bind=engine)
 
@@ -24,11 +33,6 @@ app.add_middleware(
 )
 
 
-def deal_data(data):
-    print("调用算法...")
-    return "11111"
-
-
 @app.get("/", tags=["主页"])
 def get_home():
     return "hello,welcome!"
@@ -39,35 +43,46 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info("websocket建立连接...")
     await websocket.accept()
     retry = 0
+
     while True:
         try:
-            await websocket.send_text("1")
-            recv = json.loads(await asyncio.wait_for(websocket.receive_text(), 5))
-            # print(recv,type(recv))
-            if recv == "0":
-                await websocket.send_text("1")
+            recv = json.loads(await asyncio.wait_for(websocket.receive_text(), 60))
+
+            if recv == HEARTBEAT_MESSAGE:
+                await websocket.send_text(json.dumps("1"))
                 retry = 0
             else:
                 res = deal_data(recv)
-                await websocket.send_text(res)
-        except Exception as e:
+                await websocket.send_text(json.dumps(res))
+
+        except WebSocketDisconnect:
+            logger.info("websocket连接断开，系统异常！请退出重新登陆！")
+            break
+        except asyncio.TimeoutError:
             logger.info("心跳停止...")
-            logger.info("检查websocket连接状态")
-            if websocket.application_state.value == 1:
-                logger.info("websocket处于连接中...")
-                if retry == 3:
-                    await websocket.close()
-                    print("心跳超时，服务异常，请退出重新登陆！")
-                    break
-                retry += 1
-                print("心跳停止：准备第{}次监听...".format(retry))
-            elif websocket.application_state.value == 2:
-                logger.info("websocket连接断开，系统异常！请退出重新登陆！")
+            handle_heartbeat_failure(websocket, retry)
+            retry += 1
+            if retry > MAX_RETRIES:
                 break
-            else:
-                logger.info("websocket正在连接...")
-        finally:
-            pass
+        except Exception as e:
+            logger.error(f"Unexpected error occurred: {e}")
+            break
+
+
+def handle_heartbeat_failure(websocket: WebSocket, retry: int):
+    logger.info("检查websocket连接状态")
+
+    if websocket.application_state.value == WS_CONNECTED:
+        logger.info("websocket处于连接中...")
+        if retry == MAX_RETRIES:
+            websocket.close()
+            logger.error("心跳超时，服务异常，请退出重新登陆！")
+        else:
+            logger.info(f"心跳停止：准备第{retry}次监听...")
+    elif websocket.application_state.value == WS_DISCONNECTED:
+        logger.info("websocket连接断开，系统异常！请退出重新登陆！")
+    else:
+        logger.info("websocket正在连接...")
 
 
 app.include_router(router_user)
