@@ -19,7 +19,12 @@ app.add_middleware(
 
 def deal_data(data):
     print("调用算法...")
-    return "Hello,world!"
+    return {"hello":"world"}
+
+@app.get("/")
+async def Home():
+    return "hello,world！"
+
 
 
 @app.websocket("/ws")
@@ -28,17 +33,22 @@ async def websocket_endpoint(websocket: WebSocket):
     print("websocket建立连接...")
     while True:
         try:
-            data = await websocket.receive_text()
-            print("接收到来自用户到消息：{}".format(data))
-            if isinstance(json.loads(data),dict):
-                await websocket.send_text(json.dumps({"type":"heartbeat"}))
-            else:
+
+            await websocket.send_text(json.dumps({"type": "heartbeat"}))
+            data = json.loads(await websocket.receive_text())
+            # print("接收到来自用户到消息：{}".format(data))
+            if data["type"] == "heartbeat":
+                print(data["type"])
+                await websocket.send_text(json.dumps({"type": "heartbeat"}))
+            elif data["type"] == "answer":
                 res = deal_data(data)
-                await websocket.send_text(res)
+                print(data[type])
+                # print(res)
+                await websocket.send_text(json.dumps(res))
         except Exception as e:
             print("发生异常情况...")
             await websocket.close()
             break
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=10000, ssl_keyfile="key.pem", ssl_certfile="cert.pem")
+    uvicorn.run(app, host="0.0.0.0", port=11800, ssl_keyfile="./certificate/key.pem", ssl_certfile="./certificate/cert.pem")
